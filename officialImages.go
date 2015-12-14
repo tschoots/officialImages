@@ -8,7 +8,7 @@
 
 	   9 - 12 - 2015
 	        Alle official images tags are parsed.
-	        
+
 	   13 - 12 - 2015
 	   		Everthing is pulled from git.
 	   		But it should be in parellel to speed up things
@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sync"
 )
 
 type input struct {
@@ -79,6 +80,45 @@ func DelWinDir(path string) {
 	}
 }
 
+func PullGitArch(gitUrl string, localPath string) {
+	os.MkdirAll(localPath, 0777)
+	filePath := fmt.Sprintf("%s/.git", localPath)
+	var cmd *exec.Cmd
+	if _, err := os.Stat(filePath); err == nil {
+		os.Chdir(localPath)
+		cmd = exec.Command("git",
+			"pull",
+		)
+		fmt.Println("pull")
+	} else {
+		cmd = exec.Command("git",
+			"clone",
+			gitUrl,
+			localPath,
+		)
+		fmt.Printf("clone : \n%s\n", cmd.Args)
+	}
+
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("git clone went wrong : %s\n", err)
+	}
+}
+
+func PullDockerfileArchives(gitArchives map[string]string) {
+	var wg sync.WaitGroup
+	
+	for gitUrl, localPath := range gitArchives {
+		//fmt.Printf("k: %s , v: %s\n", k, v)
+		wg.Add(1)
+		
+		go func() {
+			defer wg.Done()
+			PullGitArch(gitUrl, localPath)
+		}()
+	}
+	wg.Wait()
+}
+
 func main() {
 	flag.Parse() // Scan the arguments list
 
@@ -117,17 +157,19 @@ func main() {
 
 	fmt.Printf("current directory : %s\n", curdir)
 
-	cmd := exec.Command("git",
-		"clone",
-		"https://github.com/docker-library/official-images",
-	)
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("git clone went wrong : %s\n", err)
-	}
+//	cmd := exec.Command("git",
+//		"clone",
+//		"https://github.com/docker-library/official-images",
+//	)
+//	if err := cmd.Run(); err != nil {
+//		fmt.Printf("git clone went wrong : %s\n", err)
+//	}
+	
+	PullGitArch("https://github.com/docker-library/official-images", in.gitpath)
 
 	// get files in the
 	//files, err := ioutil.ReadDir(fmt.Sprintf("%s/official-images\library", in.gitpath))
-	imagesPath := fmt.Sprintf("%s/official-images/library", in.gitpath)
+	imagesPath := fmt.Sprintf("%s/library", in.gitpath)
 	os.Chdir(imagesPath)
 	files, err := ioutil.ReadDir(imagesPath)
 	if err != nil {
@@ -142,7 +184,7 @@ func main() {
 
 	// get all the image names tags and paths
 	//r, _ := regexp.Compile("(\\S+):\\s+(git://github.com/.+)@\\S+\\s?(\\S*)")
-	r, _ := regexp.Compile("(\\S+):\\s+(git://github.com/.+)@\\S+\\s?(\\S*)\\n")
+	r, _ := regexp.Compile("(\\S+):\\s+(git://github.com/.+)@\\S+\\s?(.*)\\n")
 	for _, f := range files {
 		fmt.Println(f.Name())
 		content, err := ioutil.ReadFile(f.Name())
@@ -174,37 +216,15 @@ func main() {
 
 	}
 
-	fmt.Printf("%v\n\n", images)
+	//fmt.Printf("%v\n\n", images)
 	//fmt.Printf("%v\n", gitArchives)
 
 	// now start pulling the Dockerfile archives
 
 	// parse the Dockerfiles to see where it's comming from
-	for gitUrl, localPath := range gitArchives {
-		//fmt.Printf("k: %s , v: %s\n", k, v)
-		os.MkdirAll(localPath, 0777)
-		filePath := fmt.Sprintf("%s/.git", localPath)
-		var cmd *exec.Cmd
-		if _, err := os.Stat(filePath); err == nil {
-			os.Chdir(localPath)
-			cmd = exec.Command("git",
-			"pull",
-		)
-		}else {
-			cmd = exec.Command("git",
-			"clone",
-			gitUrl,
-			localPath,
-		)
-		}
-		
-		if err := cmd.Run(); err != nil {
-			fmt.Printf("git clone went wrong : %s\n", err)
-		}
-	}
 
 	os.Chdir(in.gitpath)
 	os.RemoveAll(in.gitpath)
-	//DelWinDir(in.gitpath)
+	DelWinDir(in.gitpath)
 
 }
