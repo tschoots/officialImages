@@ -82,14 +82,14 @@ func DelWinDir(path string) {
 
 func PullGitArch(gitUrl string, localPath string) {
 	os.MkdirAll(localPath, 0777)
-	filePath := fmt.Sprintf("%s/.git", localPath)
+	filePath := fmt.Sprintf("%s%c.git", localPath, os.PathSeparator)
 	var cmd *exec.Cmd
 	if _, err := os.Stat(filePath); err == nil {
 		os.Chdir(localPath)
 		cmd = exec.Command("git",
-			"pull",
+			"fetch",
 		)
-		fmt.Println("pull")
+		fmt.Printf("pull : %s\n\n", localPath)
 	} else {
 		cmd = exec.Command("git",
 			"clone",
@@ -100,7 +100,7 @@ func PullGitArch(gitUrl string, localPath string) {
 	}
 
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("git clone went wrong : %s\n", err)
+		fmt.Printf("git clone went wrong : %s\n%s\n%s\n\n", err, gitUrl, localPath)
 	}
 }
 
@@ -109,11 +109,13 @@ func PullDockerfileArchives(gitArchives map[string]string) {
 	
 	for gitUrl, localPath := range gitArchives {
 		//fmt.Printf("k: %s , v: %s\n", k, v)
+		url := gitUrl
+		path := localPath
 		wg.Add(1)
 		
 		go func() {
 			defer wg.Done()
-			PullGitArch(gitUrl, localPath)
+			PullGitArch(url, path)
 		}()
 	}
 	wg.Wait()
@@ -169,7 +171,7 @@ func main() {
 
 	// get files in the
 	//files, err := ioutil.ReadDir(fmt.Sprintf("%s/official-images\library", in.gitpath))
-	imagesPath := fmt.Sprintf("%s/library", in.gitpath)
+	imagesPath := fmt.Sprintf("%s%clibrary", in.gitpath, os.PathSeparator)
 	os.Chdir(imagesPath)
 	files, err := ioutil.ReadDir(imagesPath)
 	if err != nil {
@@ -203,10 +205,10 @@ func main() {
 			tag := my_matches[ar][1]
 			gitArch := my_matches[ar][2]
 			archPath := my_matches[ar][3]
-			archivePath := fmt.Sprintf("%s/%s", in.dockerfilepath, f.Name())
+			archivePath := fmt.Sprintf("%s%c%s", in.dockerfilepath, os.PathSeparator, f.Name())
 
 			fullName := fmt.Sprintf("%s:%s", f.Name(), tag)
-			DockerfilePath := fmt.Sprintf("%s/%s/Dockerfile", archivePath, archPath)
+			DockerfilePath := fmt.Sprintf("%s%c%s%cDockerfile", archivePath, os.PathSeparator, archPath, os.PathSeparator)
 
 			gitArchives[gitArch] = archivePath
 			images[fullName] = img{f.Name(), tag, "", make([]string, 30), DockerfilePath}
@@ -220,8 +222,10 @@ func main() {
 	//fmt.Printf("%v\n", gitArchives)
 
 	// now start pulling the Dockerfile archives
+	PullDockerfileArchives(gitArchives)
 
 	// parse the Dockerfiles to see where it's comming from
+	
 
 	os.Chdir(in.gitpath)
 	os.RemoveAll(in.gitpath)
