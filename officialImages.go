@@ -87,7 +87,8 @@ func PullGitArch(gitUrl string, localPath string) {
 	if _, err := os.Stat(filePath); err == nil {
 		os.Chdir(localPath)
 		cmd = exec.Command("git",
-			"fetch",
+			"pull",
+			"-q",
 		)
 		fmt.Printf("pull : %s\n\n", localPath)
 	} else {
@@ -100,7 +101,7 @@ func PullGitArch(gitUrl string, localPath string) {
 	}
 
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("git clone went wrong : %s\n%s\n%s\n\n", err, gitUrl, localPath)
+		fmt.Printf("git clone/pull went wrong : %s\n%s\n%s\n\n", err, gitUrl, localPath)
 	}
 }
 
@@ -184,9 +185,8 @@ func main() {
 
 	gitArchives := make(map[string]string)
 
-	// get all the image names tags and paths
-	//r, _ := regexp.Compile("(\\S+):\\s+(git://github.com/.+)@\\S+\\s?(\\S*)")
-	r, _ := regexp.Compile("(\\S+):\\s+(git://github.com/.+)@\\S+\\s?(.*)\\n")
+	// get all the image names tags and paths	
+	r, _ := regexp.Compile(`(\S+):\s+(git://github.com/.+)@\S+\s?(.*)\r|\n`)
 	for _, f := range files {
 		fmt.Println(f.Name())
 		content, err := ioutil.ReadFile(f.Name())
@@ -225,6 +225,18 @@ func main() {
 	PullDockerfileArchives(gitArchives)
 
 	// parse the Dockerfiles to see where it's comming from
+	for _, image := range images {
+		fmt.Printf("name : %s:%s\n%s\n\n", image.Name, image.Tag, image.DockerfilePath)
+		if _, err := os.Stat(image.DockerfilePath); err == nil {
+			// Dockerfile exist
+			//fmt.Println("dockerfile")
+		}else{
+			// Dockerfile doesn't exist
+			fmt.Printf("no Docker file :\n%s\n\n", image.DockerfilePath)
+			
+		}
+	}
+	
 	
 
 	os.Chdir(in.gitpath)
