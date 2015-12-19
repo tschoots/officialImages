@@ -14,16 +14,22 @@
 	   		But it should be in parellel to speed up things
 	   		And parsing of dockerfiles stil has to tacke place
 	   		And generation of .dot file
-	   		
+
 	    16 - 12 -2015
 	    	inconsistencies in the docker env it looks like for example
 	    	ubuntu-upstart:utopic --> "ubuntu:14.10"
 	    	But "ubuntu:14.10" not in the archive, and not on hub.docker.com
+	    	
+	    19 - 12 -2015
+	        Created a piece of code generating a map for test code.
+	        .dot file generation is to big for Graphviz and for the stack so have to figure out something else
 */
 
 package main
 
 import (
+	"bufio"
+	//"builtin"
 	"flag"
 	"fmt"
 	"io"
@@ -31,9 +37,12 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
-	"strings"
+	"sort"
+	"bytes"
+	
 )
 
 type input struct {
@@ -61,6 +70,8 @@ type img struct {
 	DockerfilePath string
 }
 
+
+
 func IsDirEmpty(name string) (bool, error) {
 	f, err := os.Open(name)
 	if err != nil {
@@ -85,6 +96,33 @@ func DelWinDir(path string) {
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("rmdir on windows went wrong : %s\n", err)
 	}
+}
+
+func GetFromReference(pathToDockerFile string) (string, bool) {
+	file, err := os.Open(pathToDockerFile)
+	if err != nil {
+		fmt.Printf("Error opening file: %s\n", pathToDockerFile)
+		//dockerfile not there so point to scratch
+		return "scratch:latest", true
+	}
+	defer file.Close()
+
+	fromr, _ := regexp.Compile(`(?i)^\s*FROM\s*(\S+)`)
+	scanner := bufio.NewScanner(file)
+	scanner.Split(bufio.ScanLines)
+	for scanner.Scan() {
+		fmt.Println(scanner.Text())
+		my_match := fromr.FindStringSubmatch(scanner.Text())
+		if len(my_match) > 0 {
+			from_str := my_match[1]
+			if !strings.Contains(from_str, ":") {
+				from_str = fmt.Sprintf("%s:latest", from_str)
+			}
+			return from_str, true
+		}
+	}
+	fmt.Printf("No from ref in file : %s\n", pathToDockerFile)
+	return "", false
 }
 
 func PullGitArch(gitUrl string, localPath string) {
@@ -189,7 +227,7 @@ func main() {
 
 	// create a map with to store all images
 	images := make(map[string]img)
-	images["scratch:latest"] = img{"scratch", "latest", "", make([]string, 30), ""}
+	images["scratch:latest"] = img{"scratch", "latest", "", make([]string, 0), ""}
 
 	gitArchives := make(map[string]string)
 
@@ -228,7 +266,7 @@ func main() {
 			}
 
 			gitArchives[gitArch] = archivePath
-			images[fullName] = img{f.Name(), tag, "", make([]string, 30), DockerfilePath}
+			images[fullName] = img{f.Name(), tag, "", make([]string, 0), DockerfilePath}
 
 		}
 		fmt.Printf("\n\n")
@@ -241,60 +279,75 @@ func main() {
 	PullDockerfileArchives(gitArchives)
 
 	// parse the Dockerfiles to see where it's comming from
-	fromr, _ := regexp.Compile(`(?i)FROM\s*(\S+)`)
 	for k, image := range images {
 		fmt.Printf("name : %s:%s\n%s\n\n", image.Name, image.Tag, image.DockerfilePath)
-
-		if _, err := os.Stat(image.DockerfilePath); err == nil {
-			// Dockerfile exist
-			//fmt.Println("dockerfile")
-			content, err := ioutil.ReadFile(image.DockerfilePath)
-			if err != nil {
-				fmt.Printf("error opening file : %s \n", image.DockerfilePath)
-			}
-			my_match := fromr.FindStringSubmatch(string(content))
-			fmt.Printf("%s:%s \n", image.Name, image.Tag)
-			fmt.Printf("%s:%s --> %q\n", image.Name, image.Tag, my_match[1])
-			
-			from_img := my_match[1]
-			// check if there was a tag in the from field if extend to default latest
-			if !strings.Contains(from_img, ":") {
-				from_img = fmt.Sprintf("%s:latest", from_img)
-			}
-			if val, ok := images[from_img]; ok {
-				fmt.Printf("found : %s:%s", val.Name, val.Tag)
-				tmp_img := img{image.Name, image.Tag, from_img, image.Childs, image.DockerfilePath}
+		if from_ref, ok := GetFromReference(image.DockerfilePath); ok {
+			// check if the reference exists
+			if val, ok := images[from_ref]; ok {
+				// update the from reference in the current image
+				tmp_img := img{image.Name, image.Tag, from_ref, image.Childs, image.DockerfilePath}
 				images[k] = tmp_img
-			}else {
-				// this should not occur inconsistent state
-				fmt.Printf("not found : %s for image %s:%s", from_img, val.Name, val.Tag)
-				
+				// update the child array of the referenced image
+				tmp_arr := append(val.Childs, k)
+				tmp_ref_img := img{val.Name, val.Tag, val.From, tmp_arr, val.DockerfilePath}
+				images[from_ref] = tmp_ref_img
+
+			} else {
+				fmt.Printf("ERROR Docker file : %s, has a from reference that doesn't exists\n", image.DockerfilePath)
 			}
-
-			//			for i, _ := range my_match {
-			//				fmt.Printf("index : %d\n", i)
-			//				fmt.Printf("%s:%s --> %q\n", image.Name, image.Tag, my_match[i])
-			//			}
-
+			//
 		} else {
-			// Dockerfile doesn't exist
-			fmt.Printf("no Docker file :\n%s\n\n", image.DockerfilePath)
-			tmp_img := img{image.Name, image.Tag, "scratch:latest", image.Childs, image.DockerfilePath}
-			images[k] = tmp_img
-
+			fmt.Printf("ERROR Dockerfile %s doesn't exist or from reference couldn't be parsed.\n", image.DockerfilePath)
 		}
 	}
 
 	//fmt.Printf("%v\n\n", images)
 	for k, v := range images {
-		fmt.Printf("%s --> %s\n", k, v.From)
+		fmt.Printf("%-35s --> %s\n", k, v.From)
+		sort.Strings(v.Childs)
+		fmt.Printf("Childs : %q\n", v.Childs)
 		fmt.Printf("Dockerfile : %s\n", v.DockerfilePath)
 	}
+	
+	// build the dot file
+	var b bytes.Buffer
+	b.WriteString("digraph images_graph {\r\n")
+	//b.WriteString("\tprr -> trr\r\n")
+	dot_ids := make(map[string]int)
+	id := 1
+	for k, _ := range images {
+		b.WriteString(fmt.Sprintf("\t%d[label=\"%s\"]\r\n", id, k))
+		dot_ids[k] = id
+		id++
+	}
+	image_name := "scratch:latest"
+	for _, child_name := range images[image_name].Childs {
+		b.WriteString(fmt.Sprintf("\t%d -> %d\r\n", dot_ids[image_name], dot_ids[child_name]))
+	}
+	b.WriteString("}")
+	ioutil.WriteFile(`c:\tmp\dot\images.dot`, b.Bytes(), 0777)
 
 	os.Chdir(in.gitpath)
 	os.RemoveAll(in.gitpath)
 	DelWinDir(in.gitpath)
 	
+	for k, v := range images {
+		var arr_str string 
+		if len(v.Childs) > 0 {
+			var b bytes.Buffer
+			b.WriteString("[]string{")
+			for _, v := range v.Childs {
+				b.WriteString(fmt.Sprintf(" \"%s\", ", v))
+			}
+			b.WriteString("}")
+			arr_str = b.String()
+		}else{
+			arr_str = "make([]string, 0)"
+		}
+		fmt.Printf("\"%s\":img{\"%s\", \"%s\", \"%s\",  %s , `%s`,},\n", k, v.Name, v.Tag, v.From, arr_str, v.DockerfilePath)
+			
+	}
+
 	elapsed_time := time.Since(start_time)
 	fmt.Printf("time : %s", elapsed_time)
 
