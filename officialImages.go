@@ -227,6 +227,7 @@ func main() {
 
 	// create a map with to store all images
 	images := make(map[string]img)
+	images_tag_distributions := map[string]int{}
 	images["scratch:latest"] = img{"scratch", "latest", "", make([]string, 0), ""}
 
 	gitArchives := make(map[string]string)
@@ -235,6 +236,7 @@ func main() {
 	r, _ := regexp.Compile(`(\S+):\s+(git://github.com/\S+)@\S+[\t\f\v\x20]*([^\n\r]*)`)
 	for _, f := range files {
 		fmt.Println(f.Name())
+		images_tag_distributions[f.Name()] = 0
 		content, err := ioutil.ReadFile(f.Name())
 		if err != nil {
 			fmt.Printf("error opening file : %s \n", f.Name())
@@ -267,6 +269,7 @@ func main() {
 
 			gitArchives[gitArch] = archivePath
 			images[fullName] = img{f.Name(), tag, "", make([]string, 0), DockerfilePath}
+			images_tag_distributions[f.Name()] = images_tag_distributions[f.Name()] + 1
 
 		}
 		fmt.Printf("\n\n")
@@ -328,8 +331,8 @@ func main() {
 	ioutil.WriteFile(`c:\tmp\dot\images.dot`, b.Bytes(), 0777)
 
 	os.Chdir(in.gitpath)
-	os.RemoveAll(in.gitpath)
-	DelWinDir(in.gitpath)
+	//os.RemoveAll(in.gitpath)
+	//DelWinDir(in.gitpath)
 	
 	for k, v := range images {
 		var arr_str string 
@@ -348,8 +351,33 @@ func main() {
 			
 	}
 
+    // look at at the distrubution in terms of tags
+    distro_map := map[string]int{}
+    for k, _ := range images {
+    	img_name := strings.Split(k, ":")[0]
+    	if _, ok := distro_map[img_name]; ok {
+    		distro_map[img_name] = distro_map[img_name] + 1
+    	}else {
+    		distro_map[img_name] = 1
+    	}
+    }
+    
+    // now print the distribution in alpabetic order
+    distro_arr_key := make([]string, 0, len(images_tag_distributions))
+    for k, _ := range images_tag_distributions {
+    	distro_arr_key = append(distro_arr_key, k)
+    }
+    sort.Strings(distro_arr_key)
+    for i, v := range distro_arr_key {
+    	fmt.Printf("%-2d. %-15s: %d\n",i, v, distro_map[v])
+    }
+   
+    fmt.Printf("nr of files : %d\n", len(files))
+    fmt.Printf("images_tag_distributions : %d\n", len(images_tag_distributions))
+    fmt.Printf("number of images : %d\n", len(distro_arr_key))
+    fmt.Printf("total number of images versions : %d\n", len(images))
 	elapsed_time := time.Since(start_time)
-	fmt.Printf("time : %s", elapsed_time)
+	fmt.Printf("time : %v\n", elapsed_time)
 	fmt.Println("the end")
 
 }
